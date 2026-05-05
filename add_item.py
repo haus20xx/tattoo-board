@@ -13,14 +13,13 @@ import argparse
 import re
 import sys
 from pathlib import Path
-from typing import cast
+from typing import Any
 
 # Reuse the existing pipeline's fetchers / parser.
 sys.path.insert(0, str(Path(__file__).parent))
 from build_board import (  # type: ignore
     MD_PATH,
     IMAGES,
-    INDEX_PATH,
     ROOT,
     parse_markdown,
     fetch_item,
@@ -29,7 +28,6 @@ from build_board import (  # type: ignore
     build,
     render_html,
 )
-import json
 
 VALID_KINDS = ("tattoo", "art", "lookbook")
 
@@ -137,14 +135,14 @@ def append_to_existing_category(
     Returns updated text, or None if the category wasn't found.
     """
 
-    def sub(m: re.Match) -> str:
+    def sub(m: re.Match[str]) -> str:
         if m.group("cat").strip() != category:
             return m.group(0)
         body = m.group("body").rstrip()
         new_body = f"{body}\n{item_block}" if body else item_block
         return f"{m.group(1)}{new_body}{m.group(4)}"
 
-    new_text, n = CATEGORY_BLOCK_RE.subn(sub, text, count=0)
+    new_text, _ = CATEGORY_BLOCK_RE.subn(sub, text, count=0)
     # detect whether any block was actually changed (subn count is matches, not replacements)
     if category in {m.group("cat").strip() for m in CATEGORY_BLOCK_RE.finditer(text)}:
         return new_text
@@ -158,7 +156,7 @@ def append_new_category(text: str, category: str, item_block: str) -> str:
     return text + section
 
 
-def existing_urls(items: list[dict]) -> set[str]:
+def existing_urls(items: list[dict[str, Any]]) -> set[str]:
     return {it["url"] for it in items}
 
 
@@ -221,7 +219,7 @@ def read_batch_paste() -> list[str]:
 
 def add_one(
     url: str,
-    items: list[dict],
+    items: list[dict[str, Any]],
     categories: list[str],
     progress: str = "",
 ) -> str:
@@ -231,9 +229,10 @@ def add_one(
     print("\n" + "=" * 60)
     print(f"{progress}{url}")
 
-    if url in existing_urls(items):
-        if not yesno("URL already in board. Add again anyway?", default=False):
-            return "duplicate"
+    if url in existing_urls(items) and not yesno(
+        "URL already in board. Add again anyway?", default=False
+    ):
+        return "duplicate"
 
     print("  Fetching image...")
     status, image, err = fetch_with_status(url)
@@ -271,7 +270,7 @@ def add_one(
 
 def run_batch(
     urls: list[str],
-    items: list[dict],
+    items: list[dict[str, Any]],
     categories: list[str],
 ) -> int:
     """Iterate through a list of URLs. Returns count of added items."""
@@ -351,7 +350,7 @@ def main() -> None:
         return
 
     print(f"\n{added} item(s) added. Rebuilding index.html...")
-    records = cast("list[dict]", build(category_filter=None, force=False))
+    records = build(category_filter=None, force=False)
     Path(ROOT / "index.html").write_text(render_html(records))
     print("✓ wrote index.html")
     print("\nTo publish:")

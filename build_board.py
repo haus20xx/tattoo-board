@@ -15,7 +15,6 @@ import argparse
 import hashlib
 import html
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -23,9 +22,29 @@ import sys
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Optional
+from typing import Any, NotRequired, TypedDict, cast
 
-import yaml
+import yaml  # type: ignore[import-untyped]
+
+# ---------- record schema ----------
+
+
+class Record(TypedDict):
+    """One item as stored in cache/index.json and rendered into the board."""
+
+    id: str
+    url: str
+    category: str
+    note: str
+    kind: str
+    starred: bool
+    owned: bool
+    todo: str
+    # always set by build() before a record is appended to its output list
+    status: str
+    image: str | None
+    error: NotRequired[str]
+
 
 ROOT = Path(__file__).parent
 MD_PATH = ROOT / "tattoo_idea_board_v2.md"
@@ -49,10 +68,10 @@ IMAGE_EXTS_PREFERENCE = [".jpg", ".jpeg", ".png", ".webp", ".gif"]
 SKIP_CATEGORIES = {"Format"}
 
 
-def parse_markdown(path: Path) -> list[dict]:
+def parse_markdown(path: Path) -> list[dict[str, Any]]:
     """Return list of items, each with 'category' added."""
     text = path.read_text()
-    items: list[dict] = []
+    items: list[dict[str, Any]] = []
     # match: ## Category\n ... ```yaml ... ```
     pattern = re.compile(
         r"^##\s+(?P<cat>.+?)\s*$.*?```yaml\s*\n(?P<body>.*?)\n```",
@@ -63,13 +82,14 @@ def parse_markdown(path: Path) -> list[dict]:
         if cat in SKIP_CATEGORIES:
             continue
         body = m.group("body")
-        parsed = yaml.safe_load(body) or []
+        parsed = cast("list[Any]", yaml.safe_load(body) or [])
         # ensure each entry is a dict (skip schema-doc YAML that has plain values)
         if not all(isinstance(it, dict) and "url" in it for it in parsed):
             continue
         for it in parsed:
-            it["category"] = cat
-            items.append(it)
+            entry = cast("dict[str, Any]", it)
+            entry["category"] = cat
+            items.append(entry)
     return items
 
 
@@ -80,7 +100,7 @@ def item_id(url: str) -> str:
     return hashlib.sha1(url.encode()).hexdigest()[:12]
 
 
-def find_existing(item_id_: str, root: Path) -> Optional[Path]:
+def find_existing(item_id_: str, root: Path) -> Path | None:
     """Return existing cached file (any extension) for this id, or None."""
     for ext in IMAGE_EXTS_PREFERENCE:
         p = root / f"{item_id_}{ext}"
@@ -251,7 +271,7 @@ def fetch_item(url: str, dest_stem: Path) -> Path:
 # ---------- main ----------
 
 
-def build(category_filter: Optional[str], force: bool) -> list[dict]:
+def build(category_filter: str | None, force: bool) -> list[Record]:
     IMAGES.mkdir(parents=True, exist_ok=True)
     MANUAL.mkdir(parents=True, exist_ok=True)
 
@@ -259,15 +279,11 @@ def build(category_filter: Optional[str], force: bool) -> list[dict]:
     if category_filter:
         items = [it for it in items if it["category"] == category_filter]
 
-    existing_index = {}
-    if INDEX_PATH.exists():
-        existing_index = {e["url"]: e for e in json.loads(INDEX_PATH.read_text())}
-
-    out: list[dict] = []
+    out: list[Record] = []
     for it in items:
-        url = it["url"]
+        url: str = it["url"]
         iid = item_id(url)
-        record = {
+        record: Record = {
             "id": iid,
             "url": url,
             "category": it["category"],
@@ -276,6 +292,8 @@ def build(category_filter: Optional[str], force: bool) -> list[dict]:
             "starred": bool(it.get("starred", False)),
             "owned": bool(it.get("owned", False)),
             "todo": it.get("todo", ""),
+            "status": "",
+            "image": None,
         }
 
         # 1. manual override wins
@@ -469,7 +487,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
   .gallery {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    grid-template-columns: 1fr;
     gap: 0.5rem;
     margin-top: 0.5rem;
   }
@@ -817,8 +835,8 @@ const ITEM_DATA = __ITEM_DATA__;
 """
 
 
-def render_html(records: list[dict]) -> str:
-    by_cat: dict[str, list[dict]] = {}
+def render_html(records: list[Record]) -> str:
+    by_cat: dict[str, list[Record]] = {}
     for r in records:
         by_cat.setdefault(r["category"], []).append(r)
 
@@ -846,8 +864,9 @@ def render_html(records: list[dict]) -> str:
             )
 
             # collapsed-summary thumbnail
-            if r["status"] != "failed" and r.get("image"):
-                thumb_html = f'<img class="thumb" src="{html.escape(r["image"])}" loading="lazy" alt="">'
+            image = r["image"]
+            if r["status"] != "failed" and image:
+                thumb_html = f'<img class="thumb" src="{html.escape(image)}" loading="lazy" alt="">'
             else:
                 thumb_html = '<span class="thumb" style="display:inline-block;background:#3a1a1a;"></span>'
 
@@ -861,7 +880,7 @@ def render_html(records: list[dict]) -> str:
                 body_img = (
                     f'<div class="img-wrap">'
                     f'<a href="{html.escape(r["url"])}" target="_blank">'
-                    f'<img src="{html.escape(r["image"])}" loading="lazy" alt="{html.escape(r["note"])}">'
+                    f'<img src="{html.escape(image or "")}" loading="lazy" alt="{html.escape(r["note"])}">'
                     f"</a></div>"
                 )
 
@@ -912,9 +931,10 @@ def render_html(records: list[dict]) -> str:
             display_name = (
                 r["note"] or urllib.parse.urlparse(r["url"]).netloc or r["id"]
             )
-            if r["status"] != "failed" and r.get("image"):
+            tile_image = r["image"]
+            if r["status"] != "failed" and tile_image:
                 inner = (
-                    f'<img src="{html.escape(r["image"])}" loading="lazy" '
+                    f'<img src="{html.escape(tile_image)}" loading="lazy" '
                     f'alt="{html.escape(display_name)}">'
                 )
             else:
@@ -989,11 +1009,12 @@ def main():
 
     cat = args.category or None
 
+    records: list[Record]
     if args.no_fetch:
         if not INDEX_PATH.exists():
             print("no index.json yet; run without --no-fetch first", file=sys.stderr)
             sys.exit(1)
-        records = json.loads(INDEX_PATH.read_text())
+        records = cast("list[Record]", json.loads(INDEX_PATH.read_text()))
     else:
         records = build(cat, args.force)
 
