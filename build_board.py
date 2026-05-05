@@ -8,6 +8,7 @@ Pipeline:
 Idempotent: re-runs skip already-cached items. Manual overrides at
 cache/manual/<id>.* take precedence over fetched images.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -73,6 +74,7 @@ def parse_markdown(path: Path) -> list[dict]:
 
 
 # ---------- fetchers ----------
+
 
 def item_id(url: str) -> str:
     return hashlib.sha1(url.encode()).hexdigest()[:12]
@@ -175,8 +177,10 @@ def fetch_instagram(url: str, dest_stem: Path, browser: str = "firefox") -> Path
         result = subprocess.run(
             [
                 "gallery-dl",
-                "--cookies-from-browser", browser,
-                "-D", str(tmp),
+                "--cookies-from-browser",
+                browser,
+                "-D",
+                str(tmp),
                 url,
             ],
             capture_output=True,
@@ -189,14 +193,10 @@ def fetch_instagram(url: str, dest_stem: Path, browser: str = "firefox") -> Path
             )
         # pick best file: prefer images, prefer first by name (carousel order)
         files = sorted(tmp.iterdir())
-        images = [
-            f for f in files
-            if f.suffix.lower() in DIRECT_IMAGE_EXTS
-        ]
+        images = [f for f in files if f.suffix.lower() in DIRECT_IMAGE_EXTS]
         if not images:
             video_only = any(
-                f.suffix.lower() in (".mp4", ".m4a", ".webm")
-                for f in files
+                f.suffix.lower() in (".mp4", ".m4a", ".webm") for f in files
             )
             if video_only:
                 raise RuntimeError(
@@ -214,8 +214,8 @@ def fetch_instagram(url: str, dest_stem: Path, browser: str = "firefox") -> Path
 
 
 DIRECT_IMAGE_HOSTS = (
-    "pbs.twimg.com",          # /media/<id>?format=jpg
-    "wikia.nocookie.net",     # /.../File.png/revision/latest?cb=...
+    "pbs.twimg.com",  # /media/<id>?format=jpg
+    "wikia.nocookie.net",  # /.../File.png/revision/latest?cb=...
     "redd.it",
     "pinimg.com",
     "redbubble.net",
@@ -250,7 +250,8 @@ def fetch_item(url: str, dest_stem: Path) -> Path:
 
 # ---------- main ----------
 
-def build(category_filter: Optional[str], force: bool) -> dict:
+
+def build(category_filter: Optional[str], force: bool) -> list[dict]:
     IMAGES.mkdir(parents=True, exist_ok=True)
     MANUAL.mkdir(parents=True, exist_ok=True)
 
@@ -840,7 +841,9 @@ def render_html(records: list[dict]) -> str:
                 classes.append("failed")
 
             # display name = note, fallback to host or id
-            display_name = r["note"] or urllib.parse.urlparse(r["url"]).netloc or r["id"]
+            display_name = (
+                r["note"] or urllib.parse.urlparse(r["url"]).netloc or r["id"]
+            )
 
             # collapsed-summary thumbnail
             if r["status"] != "failed" and r.get("image"):
@@ -859,7 +862,7 @@ def render_html(records: list[dict]) -> str:
                     f'<div class="img-wrap">'
                     f'<a href="{html.escape(r["url"])}" target="_blank">'
                     f'<img src="{html.escape(r["image"])}" loading="lazy" alt="{html.escape(r["note"])}">'
-                    f'</a></div>'
+                    f"</a></div>"
                 )
 
             tags = [r["kind"]] if r["kind"] else []
@@ -869,30 +872,31 @@ def render_html(records: list[dict]) -> str:
             tag_html = "".join(f"<span>{html.escape(t)}</span>" for t in tags)
             todo_html = (
                 f'<div class="todo">TODO: {html.escape(r["todo"])}</div>'
-                if r["todo"] else ""
+                if r["todo"]
+                else ""
             )
 
             md_starred = "true" if r["starred"] else "false"
             cards.append(
                 f'<details class="{" ".join(classes)}" id="{item_anchor}" '
                 f'data-id="{r["id"]}" data-md-starred="{md_starred}" open>'
-                f'<summary>'
+                f"<summary>"
                 f'<span class="caret">▾</span>'
-                f'{thumb_html}'
+                f"{thumb_html}"
                 f'<span class="summary-name">{html.escape(display_name)}</span>'
-                f'</summary>'
-                f'{body_img}'
+                f"</summary>"
+                f"{body_img}"
                 f'<div class="meta">'
                 f'<button class="star-toggle" type="button" aria-pressed="false">'
                 f'<span class="star-glyph">☆</span> <span class="star-label">star</span>'
-                f'</button>'
+                f"</button>"
                 f'<div class="tags">{tag_html}</div>'
-                f'{todo_html}'
+                f"{todo_html}"
                 f'<a class="src" href="{html.escape(r["url"])}" target="_blank">{html.escape(r["url"])}</a>'
-                f'</div></details>'
+                f"</div></details>"
             )
 
-            star_cls = " class=\"starred\"" if r["starred"] else ""
+            star_cls = ' class="starred"' if r["starred"] else ""
             toc_items.append(
                 f'<li><a href="#{item_anchor}"{star_cls}>{html.escape(display_name)}</a></li>'
             )
@@ -905,14 +909,16 @@ def render_html(records: list[dict]) -> str:
                 tile_classes.append("starred")
             if r["status"] == "failed":
                 tile_classes.append("failed")
-            display_name = r["note"] or urllib.parse.urlparse(r["url"]).netloc or r["id"]
+            display_name = (
+                r["note"] or urllib.parse.urlparse(r["url"]).netloc or r["id"]
+            )
             if r["status"] != "failed" and r.get("image"):
                 inner = (
                     f'<img src="{html.escape(r["image"])}" loading="lazy" '
                     f'alt="{html.escape(display_name)}">'
                 )
             else:
-                inner = f'<span>{html.escape(display_name)}<br>(failed)</span>'
+                inner = f"<span>{html.escape(display_name)}<br>(failed)</span>"
             tiles.append(
                 f'<button type="button" class="{" ".join(tile_classes)}" '
                 f'data-id="{r["id"]}" aria-label="{html.escape(display_name)}">{inner}</button>'
@@ -923,19 +929,19 @@ def render_html(records: list[dict]) -> str:
             f'<summary>{html.escape(cat)} <span class="count">({len(recs)})</span></summary>'
             f'<div class="grid">{"".join(cards)}</div>'
             f'<div class="gallery">{"".join(tiles)}</div>'
-            f'</details>'
+            f"</details>"
         )
         toc_cats.append(
             f'<li class="cat">'
             f'<div class="cat-row"><span class="cat-caret">▾</span>'
             f'<a href="#{cat_slug}" onclick="event.stopPropagation()" style="color:inherit;text-decoration:none;">'
             f'{html.escape(cat)}</a> <span style="color:var(--muted);font-size:0.75rem;">({len(recs)})</span>'
-            f'</div>'
+            f"</div>"
             f'<ul class="items">{"".join(toc_items)}</ul>'
-            f'</li>'
+            f"</li>"
         )
 
-    toc_html = f'<ul>{"".join(toc_cats)}</ul>'
+    toc_html = f"<ul>{''.join(toc_cats)}</ul>"
 
     ok = sum(1 for r in records if r["status"] in ("ok", "manual"))
     failed = sum(1 for r in records if r["status"] == "failed")
@@ -958,21 +964,27 @@ def render_html(records: list[dict]) -> str:
     }
     item_data_json = json.dumps(item_data)
 
-    return (HTML_TEMPLATE
-            .replace("__SUMMARY__", html.escape(summary))
-            .replace("__TOC__", toc_html)
-            .replace("__ITEM_DATA__", item_data_json)
-            .replace("__SECTIONS__", "\n".join(sections)))
+    return (
+        HTML_TEMPLATE.replace("__SUMMARY__", html.escape(summary))
+        .replace("__TOC__", toc_html)
+        .replace("__ITEM_DATA__", item_data_json)
+        .replace("__SECTIONS__", "\n".join(sections))
+    )
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--category", default="Tribute: Outer Wilds",
-                    help="Filter to one category (default: Outer Wilds). Use '' for all.")
-    ap.add_argument("--force", action="store_true",
-                    help="Re-fetch even if cached.")
-    ap.add_argument("--no-fetch", action="store_true",
-                    help="Skip fetching, render existing index.json only.")
+    ap.add_argument(
+        "--category",
+        default="Tribute: Outer Wilds",
+        help="Filter to one category (default: Outer Wilds). Use '' for all.",
+    )
+    ap.add_argument("--force", action="store_true", help="Re-fetch even if cached.")
+    ap.add_argument(
+        "--no-fetch",
+        action="store_true",
+        help="Skip fetching, render existing index.json only.",
+    )
     args = ap.parse_args()
 
     cat = args.category or None
