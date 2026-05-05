@@ -2,3 +2,5 @@ cache/_tmp_ig/
 *.pyc
 __pycache__/
 .DS_Store
+.pi-lens/
+.venv/
