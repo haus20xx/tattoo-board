@@ -265,6 +265,9 @@ Each category contains a YAML list of items. Fields:
 - url: https://payload.cargocollective.com/1/8/263533/14324465/19-C_1200.jpg
   note: the cell
   kind: art
+- url: https://www.instagram.com/p/DJoDYu2IDkk/
+  note: Doorlike
+  kind: art
 ```
 
 ## Tribute: Berserk
