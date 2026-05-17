@@ -73,8 +73,10 @@ def parse_markdown(path: Path) -> list[dict[str, Any]]:
     text = path.read_text()
     items: list[dict[str, Any]] = []
     # match: ## Category\n ... ```yaml ... ```
+    # Tempered .*? so a heading's lookahead can't swallow the next ## section's
+    # yaml block (which would mis-attribute items to the wrong category).
     pattern = re.compile(
-        r"^##\s+(?P<cat>.+?)\s*$.*?```yaml\s*\n(?P<body>.*?)\n```",
+        r"^##\s+(?P<cat>[^\n]+?)\s*$(?:(?!^##\s).)*?```yaml\s*\n(?P<body>.*?)\n```",
         re.DOTALL | re.MULTILINE,
     )
     for m in pattern.finditer(text):
