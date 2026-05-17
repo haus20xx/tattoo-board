@@ -376,6 +376,48 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   }
   header.lean .view-toggle button:hover { color: var(--text); }
   header.lean .view-toggle button.active { background: #4a4a4a; color: var(--text); }
+  header.lean button.export-btn {
+    background: #333; color: var(--text); border: 1px solid #444;
+    border-radius: 4px; cursor: pointer; font-size: 0.8rem;
+    padding: 0.25rem 0.6rem;
+  }
+  header.lean button.export-btn:hover { background: #404040; }
+
+  /* export overlay */
+  #export-overlay {
+    display: none;
+    position: fixed; inset: 0; z-index: 200;
+    background: rgba(0,0,0,0.85);
+    align-items: center; justify-content: center;
+    padding: 2rem;
+  }
+  #export-overlay.open { display: flex; }
+  #export-overlay .panel {
+    background: var(--panel); border-radius: 8px;
+    max-width: min(900px, 95vw); width: 100%;
+    max-height: 90vh; display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  #export-overlay header {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.6rem 0.9rem; border-bottom: 1px solid #333;
+    background: var(--panel2);
+  }
+  #export-overlay header h2 { margin: 0; font-size: 0.95rem; font-weight: 600; }
+  #export-overlay header .count { color: var(--muted); font-size: 0.8rem; margin-right: auto; }
+  #export-overlay header button {
+    background: #333; color: var(--text); border: 1px solid #444;
+    border-radius: 4px; cursor: pointer; font-size: 0.8rem;
+    padding: 0.25rem 0.6rem;
+  }
+  #export-overlay header button:hover { background: #404040; }
+  #export-overlay textarea {
+    flex: 1; min-height: 50vh;
+    background: #111; color: #ddd; border: none;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.8rem; padding: 0.75rem 1rem;
+    resize: none; outline: none;
+  }
 
   #toc {
     display: none;
@@ -568,10 +610,23 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       <button data-view="list" class="active">List</button>
       <button data-view="gallery">Gallery</button>
     </div>
+    <button class="export-btn" id="export-btn" type="button" title="Export starred items as a rebuildable board payload">Export starred</button>
     <span class="summary">__SUMMARY__</span>
   </div>
   <nav id="toc" aria-label="Table of contents">__TOC__</nav>
 </header>
+<div id="export-overlay" aria-hidden="true">
+  <div class="panel">
+    <header>
+      <h2>Starred export</h2>
+      <span class="count" id="export-count"></span>
+      <button type="button" id="export-copy">Copy</button>
+      <button type="button" id="export-download">Download .md</button>
+      <button type="button" id="export-close">Close</button>
+    </header>
+    <textarea id="export-text" spellcheck="false" readonly></textarea>
+  </div>
+</div>
 <div class="modal-backdrop" id="modal" role="dialog" aria-modal="true" aria-hidden="true">
   <div class="modal">
     <button class="close" id="modal-close" aria-label="Close">×</button>
@@ -735,6 +790,112 @@ const ITEM_DATA = __ITEM_DATA__;
     });
   }
   init();
+
+  // ---------- Export starred ----------
+  /**
+   * Build a markdown payload (matching tattoo_idea_board_v2.md format) that
+   * contains only the currently-effective-starred items, grouped by
+   * category in their original on-page order. The result can be fed back
+   * into build_board.py to materialize a new board of just the favorites.
+   */
+  function buildStarredPayload() {
+    // Preserve on-page order: iterate cards in DOM order, group by category.
+    const groups = new Map(); // category -> [{id, data}]
+    document.querySelectorAll('details.card.starred[data-id]').forEach(card => {
+      const id = card.dataset.id;
+      const data = ITEM_DATA[id];
+      if (!data) return;
+      const cat = data.category || 'Uncategorized';
+      if (!groups.has(cat)) groups.set(cat, []);
+      // Dedupe by id within a category (cards can repeat across views).
+      if (groups.get(cat).some(e => e.id === id)) return;
+      groups.get(cat).push({ id, data });
+    });
+
+    const total = Array.from(groups.values()).reduce((n, a) => n + a.length, 0);
+
+    // YAML double-quoted scalar via JSON.stringify (compatible subset).
+    const q = (s) => JSON.stringify(String(s));
+
+    const lines = [];
+    lines.push('# Tattoo Vision Board — Starred Subset');
+    lines.push('');
+    lines.push('Auto-generated from local star state. Drop into the same');
+    lines.push('build pipeline to materialize a board of just these items.');
+    lines.push('');
+    for (const [cat, entries] of groups) {
+      lines.push('## ' + cat);
+      lines.push('');
+      lines.push('```yaml');
+      for (const { data } of entries) {
+        lines.push('- url: ' + data.url);
+        if (data.note) lines.push('  note: ' + q(data.note));
+        if (data.kind) lines.push('  kind: ' + data.kind);
+        lines.push('  starred: true');
+        if (data.owned) lines.push('  owned: true');
+        if (data.todo) lines.push('  todo: ' + q(data.todo));
+      }
+      lines.push('```');
+      lines.push('');
+    }
+    return { text: lines.join(String.fromCharCode(10)), total, categories: groups.size };
+  }
+
+  const exportOverlay = document.getElementById('export-overlay');
+  const exportBtn = document.getElementById('export-btn');
+  const exportClose = document.getElementById('export-close');
+  const exportCopy = document.getElementById('export-copy');
+  const exportDownload = document.getElementById('export-download');
+  const exportText = document.getElementById('export-text');
+  const exportCount = document.getElementById('export-count');
+
+  function openExport() {
+    const { text, total, categories } = buildStarredPayload();
+    exportText.value = text;
+    exportCount.textContent =
+      total === 0
+        ? 'no starred items'
+        : `${total} item${total === 1 ? '' : 's'} \u00b7 ${categories} categor${categories === 1 ? 'y' : 'ies'}`;
+    exportOverlay.classList.add('open');
+    exportOverlay.setAttribute('aria-hidden', 'false');
+    // Select for easy manual copy.
+    requestAnimationFrame(() => { exportText.focus(); exportText.select(); });
+  }
+  function closeExport() {
+    exportOverlay.classList.remove('open');
+    exportOverlay.setAttribute('aria-hidden', 'true');
+  }
+  exportBtn.addEventListener('click', openExport);
+  exportClose.addEventListener('click', closeExport);
+  exportOverlay.addEventListener('click', (e) => {
+    if (e.target === exportOverlay) closeExport();
+  });
+  exportCopy.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(exportText.value);
+      const orig = exportCopy.textContent;
+      exportCopy.textContent = 'Copied!';
+      setTimeout(() => { exportCopy.textContent = orig; }, 1200);
+    } catch {
+      exportText.focus(); exportText.select();
+    }
+  });
+  exportDownload.addEventListener('click', () => {
+    const blob = new Blob([exportText.value], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'tattoo_idea_board_starred.md';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && exportOverlay.classList.contains('open')) {
+      closeExport();
+    }
+  });
 
   // ---------- Modal ----------
   const modal = document.getElementById('modal');
@@ -977,6 +1138,7 @@ def render_html(records: list[Record]) -> str:
             "note": r.get("note", ""),
             "kind": r.get("kind", ""),
             "status": r.get("status", ""),
+            "category": r.get("category", ""),
             "starred": bool(r.get("starred", False)),
             "owned": bool(r.get("owned", False)),
             "todo": r.get("todo", ""),
